@@ -1,16 +1,26 @@
 /*****************************************************************************************************************
- * 
- */
+  Author:       Jacobus Van Eeden
+  Date:         July 2017 -> xxxxxx 2017
+  Filename:     volumecontrolandtemplogger.ino
 
+  Description:
+  The purpose of this program is to setup a test device that will log temperature measurements of audio power
+  amplifiers at predictable intervals and while controlling the attenuation of the audio signal being fed to the
+  amplifier. The basic logic of the system was insprired by the Arduino Temperature and Light Logger tutorial
+  mostly the SD card interactions, the thermocouple interfacing and attenuator circuit interfacing was done by me.
+  Schematics should eventually be included in the GIT repository.
+******************************************************************************************************************/
+
+//Includes
 #include <SPI.h>
 #include <SD.h>
 #include <Wire.h>
 #include "RTClib.h"
 
-// A simple data logger for the Arduino analog pins
-
+// Global Variables
 uint32_t syncTime = 0; // time of last sync()
 
+// Defines
 #define ECHO_TO_SERIAL   1 // echo data to serial port
 #define WAIT_TO_START    0 // Wait for serial input in setup()
 
@@ -18,21 +28,15 @@ uint32_t syncTime = 0; // time of last sync()
 #define redLEDpin 2
 #define greenLEDpin 3
 
-// The analog pins that connect to the sensors
-#define tempPin 0                // analog 1
-#define BANDGAPREF 14            // special indicator that we want to measure the bandgap
-
-//#define aref_voltage 3.3         // we tie 3.3V to ARef and measure it with a multimeter!
-#define bandgap_voltage 1.1      // this is not super guaranteed but its not -too- off
-
-static const int SamplePeriod = 1000;							// Time in milliseconds between acquires (also affects logging)
-static const int SavePeriod = 10000;							// Time in milliseconds between saves (should be greater than SamplePeriod, larger values result in faster operation)
-
+static const int tempPin 0                                // Sets analog channel from which to measure AD8495 breakout board from
+static const int SamplePeriod = 1000;							        // Time in milliseconds between acquires (also affects logging)
+static const int SavePeriod = 10000;							        // Time in milliseconds between saves (should be greater than SamplePeriod, larger values result in faster operation)
 static const float thermocouple_voltage = 1.25;
-static const float thermocouple_divider = 0.005; 
+static const float thermocouple_divider = 0.005;
+static const float ADCRes = 0.0049; 
 
 static const int LM1971_Byte_0 = 0;     // Sets Byte 0 to always be 0 since the LM1971m is a mono device and does not need channel select
-static const int LM1971_Byte_1 = 0;	{
+static const int LM1971_Byte_1[] =	{
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
   24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
   63 // 63 is MUTE for the LM1971m
@@ -41,8 +45,8 @@ static const int LM1971_Byte_1 = 0;	{
 
 RTC_PCF8523 RTC; 													// Data Logger Shield Real Time Clock Object 
 
-const int SD_Select = 10; 											// SD Card Select Pin (Set by shield but can be changed if so required refer to data sheets)
-const int VC_Select = ; 												// Volume Controller Select Pin
+static const int SD_Select = 10; 											// SD Card Select Pin (Set by shield but can be changed if so required refer to data sheets)
+static const int VC_Select = 5; 												// Volume Controller Select Pin
 
 File TempLogFile;														// File object for the log file
 
@@ -183,7 +187,7 @@ void loop(void)
   delay(10);
   int tempReading = analogRead(tempPin);    
 
-  float tempReadingAdjusted = tempReading * 0.0049;
+  float tempReadingAdjusted = tempReading * ADCRes;
 
   TempLogFile.print(", ");
   TempLogFile.print(tempReading);
@@ -197,29 +201,12 @@ void loop(void)
   float temperatureC = (tempReadingAdjusted - thermocouple_voltage)/thermocouple_divider;
   float temperatureF = (temperatureC * 9 / 5) + 32;
   
-  //TempLogFile.print(", ");    
-  //TempLogFile.print(photocellReading);
   TempLogFile.print(", ");    
   TempLogFile.print(temperatureC);
 #if ECHO_TO_SERIAL
-  //Serial.print(", ");   
-  //Serial.print(photocellReading);
   Serial.print(", ");    
   Serial.print(temperatureC);
 #endif //ECHO_TO_SERIAL
-
-  // Log the estimated 'VCC' voltage by measuring the internal 1.1v ref
-  analogRead(BANDGAPREF); 
-  delay(10);
-  int refReading = analogRead(BANDGAPREF); 
-  float supplyvoltage = (bandgap_voltage * 1024) / refReading; 
-  
-  TempLogFile.print(", ");
-  TempLogFile.print(supplyvoltage);
-#if ECHO_TO_SERIAL
-  Serial.print(", ");   
-  Serial.print(supplyvoltage);
-#endif // ECHO_TO_SERIAL
 
   TempLogFile.println();
 #if ECHO_TO_SERIAL
