@@ -18,9 +18,11 @@
 #include "RTClib.h"
 
 // Global Variables
+///////////////////
 uint32_t syncTime = 0; // time of last sync()
 
 // Defines
+//////////
 #define ECHO_TO_SERIAL   1 // echo data to serial port
 #define WAIT_TO_START    0 // Wait for serial input in setup()
 
@@ -28,12 +30,14 @@ uint32_t syncTime = 0; // time of last sync()
 #define redLEDpin 2
 #define greenLEDpin 3
 
-static const int tempPin 0                                // Sets analog channel from which to measure AD8495 breakout board from
+static const int tempPin = 0;                             // Sets analog channel from which to measure AD8495 breakout board from
 static const int SamplePeriod = 1000;							        // Time in milliseconds between acquires (also affects logging)
 static const int SavePeriod = 10000;							        // Time in milliseconds between saves (should be greater than SamplePeriod, larger values result in faster operation)
 static const float thermocouple_voltage = 1.25;
 static const float thermocouple_divider = 0.005;
 static const float ADCRes = 0.0049; 
+
+volatile int volume = 0;
 
 static const int LM1971_Byte_0 = 0;     // Sets Byte 0 to always be 0 since the LM1971m is a mono device and does not need channel select
 static const int LM1971_Byte_1[] =	{
@@ -42,13 +46,17 @@ static const int LM1971_Byte_1[] =	{
   63 // 63 is MUTE for the LM1971m
 };
 
-
+SPISettings VCSettings(5000000, MSBFIRST, SPI_MODE1); // Sets Volume Controllers SPI settings to a SPI Settings object.
 RTC_PCF8523 RTC; 													// Data Logger Shield Real Time Clock Object 
 
 static const int SD_Select = 10; 											// SD Card Select Pin (Set by shield but can be changed if so required refer to data sheets)
-static const int VC_Select = 5; 												// Volume Controller Select Pin
+static const int VC_Select = 9; 												// Volume Controller Select Pin
 
 File TempLogFile;														// File object for the log file
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+// FUNCTIONS
+//////////////////////////////////////////////////////////////////////////////////////////////////
 
 void error(char *str)
 {
@@ -61,6 +69,9 @@ void error(char *str)
   while(1);
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////////
+// SETUP LOOP 
+//////////////////////////////////////////////////////////////////////////////////////////////////
 void setup(void)
 {
   Serial.begin(9600);
@@ -75,11 +86,11 @@ void setup(void)
   while (!Serial.available());
 #endif //WAIT_TO_START
 
+  pinMode(SD_Select, OUTPUT);       // Sets SD_Select pin as an output (SD Card)
+  pinMode(VC_Select, OUTPUT);       // sets VC_Select pin as an output (Volume Controller)
+  digitalWrite(VC_Select, HIGH);    // Sets the VC_Select pin high for inactive.
   // initialize the SD card
   Serial.print("Initializing SD card...");
-  // make sure that the default chip select pin is set to
-  // output, even if you don't use it:
-  pinMode(10, OUTPUT);
   
   // see if the card is present and can be initialized:
   if (!SD.begin(SD_Select)) {
@@ -114,16 +125,20 @@ void setup(void)
     Serial.println("RTC failed");
 #endif  //ECHO_TO_SERIAL
   }
-  
+
+
+  SPI.begin();  // Initiallizes the spi controlls.
 
   TempLogFile.println("millis,stamp,datetime,light,temp,vcc");    
 #if ECHO_TO_SERIAL
   Serial.println("millis,stamp,datetime,light,temp,vcc");
 #endif //ECHO_TO_SERIAL
- 
-  // If you want to set the aref to something other than 5v
-  analogReference(EXTERNAL);
+
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+// MAIN LOOP 
+//////////////////////////////////////////////////////////////////////////////////////////////////
 
 void loop(void)
 {
@@ -177,12 +192,8 @@ void loop(void)
   Serial.print(":");
   Serial.print(now.second(), DEC);
   Serial.print('"');
-#endif //ECHO_TO_SERIALaaaaa
-
-//  analogRead(photocellPin);
-//  delay(10); 
-//  int photocellReading = analogRead(photocellPin);  
-  
+#endif //ECHO_TO_SERIAL
+   
   analogRead(tempPin); 
   delay(10);
   int tempReading = analogRead(tempPin);    
@@ -224,7 +235,16 @@ void loop(void)
   digitalWrite(redLEDpin, HIGH);
   TempLogFile.flush();
   digitalWrite(redLEDpin, LOW);
-  
+
+  // the volume control code
+
+  SPI.beginTransaction(VCSettings);
+  digitalWrite(VC_Select, LOW);
+  SPI.transfer(LM1971_Byte_0),
+  SPI.transfer(LM1971_Byte_1[volume]);
+  delay(100);
+  digitalWrite(VC_Select, HIGH);
+  SPI.endTransaction();
 }
 
 
