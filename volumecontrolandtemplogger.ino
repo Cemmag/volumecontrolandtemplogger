@@ -21,36 +21,36 @@
 ///////////////////
 uint32_t syncTime = 0; // time of last sync()
 
-// Defines
-//////////
-#define ECHO_TO_SERIAL   1 // echo data to serial port
-#define WAIT_TO_START    0 // Wait for serial input in setup()
+// Defines & Constants
+//////////////////////
+#define SERIAL_PRINT   1 // echo data to serial port
 
 // the digital pins that connect to the LEDs
 #define redLEDpin 2
 #define greenLEDpin 3
 
-static const int tempPin = 0;                             // Sets analog channel from which to measure AD8495 breakout board from
+static const int redLED
 static const int SamplePeriod = 1000;							        // Time in milliseconds between acquires (also affects logging)
 static const int SavePeriod = 10000;							        // Time in milliseconds between saves (should be greater than SamplePeriod, larger values result in faster operation)
-static const float thermocouple_voltage = 1.25;
-static const float thermocouple_divider = 0.005;
-static const float ADCRes = 0.0049; 
+static const int tempPin = 0;                             // Sets analog channel from which to measure AD8495 breakout board from
+static const float thermocouple_voltage = 1.25;           // Constant for the AD8495 equation
+static const float thermocouple_divider = 0.005;          // Constant for the AD8495 equation
+static const float ADCRes = 0.0049;                       // Resolution of Ardunio ADC 4.9mV per 1 ADC Count
 
 volatile int volume = 0;
 
 static const int LM1971_Byte_0 = 0;     // Sets Byte 0 to always be 0 since the LM1971m is a mono device and does not need channel select
 static const int LM1971_Byte_1[] =	{
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
-  24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-  63 // 63 is MUTE for the LM1971m
-};
+  63, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23,
+  22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+}; // 63 is mute, rest of the values are equivalent to attenuation in dB
 
 SPISettings VCSettings(5000000, MSBFIRST, SPI_MODE1); // Sets Volume Controllers SPI settings to a SPI Settings object.
 RTC_PCF8523 RTC; 													// Data Logger Shield Real Time Clock Object 
 
 static const int SD_Select = 10; 											// SD Card Select Pin (Set by shield but can be changed if so required refer to data sheets)
 static const int VC_Select = 9; 												// Volume Controller Select Pin
+static const int startSelect = 8;                       // Digital I/O pin used for the enable switch.
 
 File TempLogFile;														// File object for the log file
 
@@ -58,10 +58,13 @@ File TempLogFile;														// File object for the log file
 // FUNCTIONS
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Error function sets the RED LED high and hangs if the SD doesnt initialize, it also prints to serial if enabled.
 void error(char *str)
 {
-  Serial.print("error: ");
-  Serial.println(str);
+  #if SERIAL_PRINT
+    Serial.print("error: ");
+    Serial.println(str);
+  #endif
   
   // red LED indicates error
   digitalWrite(redLEDpin, HIGH);
@@ -77,17 +80,19 @@ void setup(void)
   Serial.begin(9600);
   Serial.println();
   
-  // use debugging LEDs
-  pinMode(redLEDpin, OUTPUT);
-  pinMode(greenLEDpin, OUTPUT);
+  // Pin Mode selections
+  pinMode(redLEDpin, OUTPUT);                 // Status LED
+  pinMode(greenLEDpin, OUTPUT);               // Status LED
+  pinMode(startSelect, INPUT);                // Start input pin setup
+  pinMode(SD_Select, OUTPUT);                 // Sets SD_Select pin as an output (SD Card)
+  pinMode(VC_Select, OUTPUT);                 // sets VC_Select pin as an output (Volume Controller)
   
 #if WAIT_TO_START
   Serial.println("Type any character to start");
   while (!Serial.available());
 #endif //WAIT_TO_START
 
-  pinMode(SD_Select, OUTPUT);       // Sets SD_Select pin as an output (SD Card)
-  pinMode(VC_Select, OUTPUT);       // sets VC_Select pin as an output (Volume Controller)
+
   digitalWrite(VC_Select, HIGH);    // Sets the VC_Select pin high for inactive.
   // initialize the SD card
   Serial.print("Initializing SD card...");
@@ -98,11 +103,13 @@ void setup(void)
   }
   Serial.println("card initialized.");
   
-  // create a new file
-  char filename[] = "LOGGER00.CSV";
-  for (uint8_t i = 0; i < 100; i++) {
-    filename[6] = i/10 + '0';
-    filename[7] = i%10 + '0';
+  // Creates a new file name, highest file number is 999
+  char filename[] = "Temperature_000.CSV";
+  for (uint8_t i = 0; i < 1000; i++) {
+    filename[12] = i/100 + '0';
+    filename[13] = i/10 + '0';
+    filename[14] = i%10 + '0';
+    // if checks to see if the file exists, if it does it runs through another for iteration, if not file is created and it exits.
     if (! SD.exists(filename)) {
       // only open a new file if it doesn't exist
       TempLogFile = SD.open(filename, FILE_WRITE); 
@@ -121,18 +128,18 @@ void setup(void)
   Wire.begin();  
   if (!RTC.begin()) {
     TempLogFile.println("RTC failed");
-#if ECHO_TO_SERIAL
+#if SERIAL_PRINT
     Serial.println("RTC failed");
-#endif  //ECHO_TO_SERIAL
+#endif  //SERIAL_PRINT
   }
 
 
   SPI.begin();  // Initiallizes the spi controlls.
 
   TempLogFile.println("millis,stamp,datetime,light,temp,vcc");    
-#if ECHO_TO_SERIAL
+#if SERIAL_PRINT
   Serial.println("millis,stamp,datetime,light,temp,vcc");
-#endif //ECHO_TO_SERIAL
+#endif //SERIAL_PRINT
 
 }
 
@@ -153,7 +160,7 @@ void loop(void)
   uint32_t m = millis();
   TempLogFile.print(m);           // milliseconds since start
   TempLogFile.print(", ");    
-#if ECHO_TO_SERIAL
+#if SERIAL_PRINT
   Serial.print(m);         // milliseconds since start
   Serial.print(", ");  
 #endif
@@ -176,7 +183,7 @@ void loop(void)
   TempLogFile.print(":");
   TempLogFile.print(now.second(), DEC);
   TempLogFile.print('"');
-#if ECHO_TO_SERIAL
+#if SERIAL_PRINT
   Serial.print(now.unixtime()); // seconds since 1/1/1970
   Serial.print(", ");
   Serial.print('"');
@@ -192,7 +199,7 @@ void loop(void)
   Serial.print(":");
   Serial.print(now.second(), DEC);
   Serial.print('"');
-#endif //ECHO_TO_SERIAL
+#endif //SERIAL_PRINT
    
   analogRead(tempPin); 
   delay(10);
@@ -202,10 +209,10 @@ void loop(void)
 
   TempLogFile.print(", ");
   TempLogFile.print(tempReading);
-  #if ECHO_TO_SERIAL
+  #if SERIAL_PRINT
     Serial.print(", ");   
     Serial.print(tempReading);
-  #endif // ECHO_TO_SERIAL
+  #endif // SERIAL_PRINT
   
   // converting that reading to voltage, for 3.3v arduino use 3.3, for 5.0, use 5.0
   //float voltage = tempReading * aref_voltage / 1024;  
@@ -214,15 +221,15 @@ void loop(void)
   
   TempLogFile.print(", ");    
   TempLogFile.print(temperatureC);
-#if ECHO_TO_SERIAL
+#if SERIAL_PRINT
   Serial.print(", ");    
   Serial.print(temperatureC);
-#endif //ECHO_TO_SERIAL
+#endif //SERIAL_PRINT
 
   TempLogFile.println();
-#if ECHO_TO_SERIAL
+#if SERIAL_PRINT
   Serial.println();
-#endif // ECHO_TO_SERIAL
+#endif // SERIAL_PRINT
 
   digitalWrite(greenLEDpin, LOW);
 
