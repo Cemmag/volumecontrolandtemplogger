@@ -19,7 +19,8 @@
 
 // Global Variables
 ///////////////////
-uint32_t syncTime = 0; // time of last sync()
+uint32_t saveSync_time = 0; // time of last sync()
+uint32_t volUpdated_time = 0; // time of last volume update 
 
 // Defines & Constants
 //////////////////////
@@ -29,9 +30,10 @@ uint32_t syncTime = 0; // time of last sync()
 #define redLEDpin 2
 #define greenLEDpin 3
 
-static const int redLED
+//static const int redLED
 static const int SamplePeriod = 1000;							        // Time in milliseconds between acquires (also affects logging)
 static const int SavePeriod = 10000;							        // Time in milliseconds between saves (should be greater than SamplePeriod, larger values result in faster operation)
+static const int volumePeriod = 1000;                     // Time in milliseconds between volume updates
 static const int tempPin = 0;                             // Sets analog channel from which to measure AD8495 breakout board from
 static const float thermocouple_voltage = 1.25;           // Constant for the AD8495 equation
 static const float thermocouple_divider = 0.005;          // Constant for the AD8495 equation
@@ -45,7 +47,7 @@ static const int LM1971_Byte_1[] =	{
   22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 }; // 63 is mute, rest of the values are equivalent to attenuation in dB
 
-SPISettings VCSettings(5000000, MSBFIRST, SPI_MODE1); // Sets Volume Controllers SPI settings to a SPI Settings object.
+SPISettings VCSettings(500000, MSBFIRST, SPI_MODE1); // Sets Volume Controllers SPI settings to a SPI Settings object.
 RTC_PCF8523 RTC; 													// Data Logger Shield Real Time Clock Object 
 
 static const int SD_Select = 10; 											// SD Card Select Pin (Set by shield but can be changed if so required refer to data sheets)
@@ -87,12 +89,6 @@ void setup(void)
   pinMode(SD_Select, OUTPUT);                 // Sets SD_Select pin as an output (SD Card)
   pinMode(VC_Select, OUTPUT);                 // sets VC_Select pin as an output (Volume Controller)
   
-#if WAIT_TO_START
-  Serial.println("Type any character to start");
-  while (!Serial.available());
-#endif //WAIT_TO_START
-
-
   digitalWrite(VC_Select, HIGH);    // Sets the VC_Select pin high for inactive.
   // initialize the SD card
   Serial.print("Initializing SD card...");
@@ -104,11 +100,11 @@ void setup(void)
   Serial.println("card initialized.");
   
   // Creates a new file name, highest file number is 999
-  char filename[] = "Temperature_000.CSV";
+  char filename[] = "Temp_000.CSV";
   for (uint8_t i = 0; i < 1000; i++) {
-    filename[12] = i/100 + '0';
-    filename[13] = i/10 + '0';
-    filename[14] = i%10 + '0';
+    filename[5] = i/100 + '0';
+    filename[6] = i/10 + '0';
+    filename[7] = i%10 + '0';
     // if checks to see if the file exists, if it does it runs through another for iteration, if not file is created and it exits.
     if (! SD.exists(filename)) {
       // only open a new file if it doesn't exist
@@ -233,25 +229,51 @@ void loop(void)
 
   digitalWrite(greenLEDpin, LOW);
 
+  if ((millis() - volUpdated_time) > volumePeriod)
+  {
+    volUpdated_time = millis(); 
+    SPI.beginTransaction(VCSettings);
+    digitalWrite(VC_Select, LOW);
+    SPI.transfer(LM1971_Byte_0);
+    SPI.transfer(LM1971_Byte_1[volume]);
+    delay(100);
+    digitalWrite(VC_Select, HIGH);
+    SPI.endTransaction();
+    if(volume++ > 45)
+      volume = 0;
+  }
+
+ /* // the volume control code
+  if ((millis() - volUpdated_time) < volumePeriod)
+  {
+    
+  }
+  else 
+  {
+    volUpdated_time = millis(); 
+    SPI.beginTransaction(VCSettings);
+    digitalWrite(VC_Select, LOW);
+    SPI.transfer(LM1971_Byte_0);
+    SPI.transfer(LM1971_Byte_1[volume]);
+    delay(100);
+    digitalWrite(VC_Select, HIGH);
+    SPI.endTransaction();
+    if(volume++ > 45)
+      volume = 0;
+  }
+*/
+
   // Now we write data to disk! Don't sync too often - requires 2048 bytes of I/O to SD card
   // which uses a bunch of power and takes time
-  if ((millis() - syncTime) < SavePeriod) return;
-  syncTime = millis();
+  if ((millis() - saveSync_time) < SavePeriod) return;
+  saveSync_time = millis();
   
   // blink LED to show we are syncing data to the card & updating FAT!
   digitalWrite(redLEDpin, HIGH);
   TempLogFile.flush();
   digitalWrite(redLEDpin, LOW);
 
-  // the volume control code
 
-  SPI.beginTransaction(VCSettings);
-  digitalWrite(VC_Select, LOW);
-  SPI.transfer(LM1971_Byte_0),
-  SPI.transfer(LM1971_Byte_1[volume]);
-  delay(100);
-  digitalWrite(VC_Select, HIGH);
-  SPI.endTransaction();
 }
 
 
