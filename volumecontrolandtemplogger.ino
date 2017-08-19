@@ -31,15 +31,15 @@ uint32_t volUpdated_time = 0; // time of last volume update
 #define greenLEDpin 3
 
 //static const int redLED
-static const int SamplePeriod = 1000;							        // Time in milliseconds between acquires (also affects logging)
-static const int SavePeriod = 10000;							        // Time in milliseconds between saves (should be greater than SamplePeriod, larger values result in faster operation)
+static const int aquirePeriod = 1000;							        // Time in milliseconds between acquires (also affects logging)
+static const int savePeriod = 10000;							        // Time in milliseconds between saves (should be greater than aquirePeriod, larger values result in faster operation)
 static const int volumePeriod = 1000;                     // Time in milliseconds between volume updates
 static const int tempPin = 0;                             // Sets analog channel from which to measure AD8495 breakout board from
 static const float thermocouple_voltage = 1.25;           // Constant for the AD8495 equation
 static const float thermocouple_divider = 0.005;          // Constant for the AD8495 equation
 static const float ADCRes = 0.0049;                       // Resolution of Ardunio ADC 4.9mV per 1 ADC Count
 
-volatile int volume = 0;
+volatile int volume = 0;                                  // "COUNTER" to keep track of the byte for the lm1971 attenuation setting
 
 static const int LM1971_Byte_0 = 0;     // Sets Byte 0 to always be 0 since the LM1971m is a mono device and does not need channel select
 static const int LM1971_Byte_1[] =	{
@@ -47,14 +47,14 @@ static const int LM1971_Byte_1[] =	{
 	22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 }; // 63 is mute, rest of the values are equivalent to attenuation in dB
 
-SPISettings VCSettings(500000, MSBFIRST, SPI_MODE1); // Sets Volume Controllers SPI settings to a SPI Settings object.
-RTC_PCF8523 RTC; 													// Data Logger Shield Real Time Clock Object 
+SPISettings VCSettings(500000, MSBFIRST, SPI_MODE1);      // Sets Volume Controllers SPI settings to a SPI Settings object 500kHz, MSB First and Mode 1.
+RTC_PCF8523 RTC; 													                // Data Logger Shield Real Time Clock Object 
 
-static const int SD_Select = 10; 											// SD Card Select Pin (Set by shield but can be changed if so required refer to data sheets)
-static const int VC_Select = 9; 												// Volume Controller Select Pin
-static const int startSelect = 8;                       // Digital I/O pin used for the enable switch.
+static const int sdSelect = 10; 											    // SD Card Select Pin (Set by shield but can be changed if so required refer to data sheets UNO DIGITAL #10)
+static const int vcSelect = 9; 												    // Volume Controller Select Pin (UNO DIGITAL #9)
+static const int startSelect = 8;                         // Digital I/O pin used for the enable switch.
 
-File TempLogFile;														// File object for the log file
+File TempLogFile;														              // File object for the log file
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 // FUNCTIONS
@@ -86,15 +86,15 @@ void setup(void)
 	pinMode(redLEDpin, OUTPUT);                 // Status LED
 	pinMode(greenLEDpin, OUTPUT);               // Status LED
 	pinMode(startSelect, INPUT);                // Start input pin setup
-	pinMode(SD_Select, OUTPUT);                 // Sets SD_Select pin as an output (SD Card)
-	pinMode(VC_Select, OUTPUT);                 // sets VC_Select pin as an output (Volume Controller)
+	pinMode(sdSelect, OUTPUT);                  // Sets sdSelect pin as an output (SD Card)
+	pinMode(vcSelect, OUTPUT);                  // sets vcSelect pin as an output (Volume Controller)
 
-	digitalWrite(VC_Select, HIGH);    // Sets the VC_Select pin high for inactive.
+	digitalWrite(vcSelect, HIGH);               
 	// initialize the SD card
 	Serial.print("Initializing SD card...");
 
 	// see if the card is present and can be initialized:
-	if (!SD.begin(SD_Select)) {
+	if (!SD.begin(sdSelect)) {
 		error("Card failed, or not present");
 	}
 	Serial.println("card initialized.");
@@ -113,6 +113,7 @@ void setup(void)
 		}
 	}
 
+  // Fails if the file could not be created
 	if (! TempLogFile) {
 		error("couldnt create file");
 	}
@@ -131,7 +132,8 @@ void setup(void)
 
 
 	SPI.begin();  // Initiallizes the spi controlls.
-
+  
+  // Sets the column headers for the log file
 	TempLogFile.println("millis,datetime,Temperature(Deg C)");    
 #if SERIAL_PRINT
 	Serial.println("millis,datetime,Temperature(Deg C)");
@@ -145,13 +147,14 @@ void setup(void)
 
 void loop(void)
 {
-  
+
+  // Start/Stop switch check
 	if(digitalRead(startSelect))
 	{
 		DateTime now;
 
 		// delay for the amount of time we want between readings
-		delay((SamplePeriod -1) - (millis() % SamplePeriod));
+		delay((aquirePeriod -1) - (millis() % aquirePeriod));
 
 		digitalWrite(greenLEDpin, HIGH);
 
@@ -223,11 +226,11 @@ void loop(void)
 		{
 			volUpdated_time = millis(); 
 			SPI.beginTransaction(VCSettings);                           // Loads SPI settings for the LM1971
-			digitalWrite(VC_Select, LOW);                               // LM1971 chip select
+			digitalWrite(vcSelect, LOW);                               // LM1971 chip select
 			SPI.transfer(LM1971_Byte_0);                                // Sends the all 0 first byte
 			SPI.transfer(LM1971_Byte_1[volume]);                        // Sents the second byte that dictates the attenuation level, simply uses incremental counter to change values.
 			delay(10);                                                  // just make sure everything is sent fine.
-			digitalWrite(VC_Select, HIGH);                              // Deselect the LM1971
+			digitalWrite(vcSelect, HIGH);                              // Deselect the LM1971
 			SPI.endTransaction();                                       // finish the SPI session
 			if(volume++ > 45)                                           // resets volume if greater than 45 otherwise just increments it                
 			  volume = 0;
@@ -235,7 +238,7 @@ void loop(void)
 
 		// Now we write data to disk! Don't sync too often - requires 2048 bytes of I/O to SD card
 		// which uses a bunch of power and takes time
-		if ((millis() - saveSync_time) > SavePeriod)
+		if ((millis() - saveSync_time) > savePeriod)
 		{
 			saveSync_time = millis();
 			// blink LED to show we are syncing data to the card & updating FAT!
