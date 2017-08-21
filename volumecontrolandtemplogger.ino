@@ -8,7 +8,9 @@ The purpose of this program is to set-up a test device that will log temperature
 amplifiers at predictable intervals and while controlling the attenuation of the audio signal being fed to the
 amplifier. The basic logic of the system was inspired by the Arduino Temperature and Light Logger tutorial
 mostly the SD card interactions, the thermocouple interfacing and attenuator circuit interfacing was done by me.
-Schematics should eventually be included in the GIT repository.
+Schematics should eventually be included in the GIT repository. The systems uses a Arduino Uno, the SD Card shield
+a AD8495 Type K thermocouple sensor and a LM1971 Overture™ Audio Attenuator. The intervals are currently set more
+for testing than for operation but can easily be changed.
 ******************************************************************************************************************/
 
 //Includes
@@ -19,18 +21,15 @@ Schematics should eventually be included in the GIT repository.
 
 // Global Variables
 ///////////////////
-uint32_t saveSync_time = 0; // time of last sync()
-uint32_t volUpdated_time = 0; // time of last volume update 
+uint32_t saveSync_time = 0;                               // time of last sync()
+uint32_t volUpdated_time = 0;                             // time of last volume update 
 
 // Defines & Constants
 //////////////////////
-#define SERIAL_PRINT   1 // echo data to serial port
+#define SERIAL_PRINT 1                                    // echo data to serial port
 
-// the digital pins that connect to the LEDs
-#define redLEDpin 2
-#define greenLEDpin 3
-
-//static const int redLED
+static const int redLED = 2;                              // RED UNO LED
+static const int greenLED = 3;                            // GREEN UNO LED
 static const int aquirePeriod = 1000;							        // Time in milliseconds between acquires (also affects logging)
 static const int savePeriod = 10000;							        // Time in milliseconds between saves (should be greater than aquirePeriod, larger values result in faster operation)
 static const int volumePeriod = 1000;                     // Time in milliseconds between volume updates
@@ -69,7 +68,7 @@ void error(char *str)
 #endif
 
 	// red LED indicates error
-	digitalWrite(redLEDpin, HIGH);
+	digitalWrite(redLED, HIGH);
 
 	while(1);
 }
@@ -83,8 +82,8 @@ void setup(void)
 	Serial.println();
 
 	// Pin Mode selections
-	pinMode(redLEDpin, OUTPUT);                 // Status LED
-	pinMode(greenLEDpin, OUTPUT);               // Status LED
+	pinMode(redLED, OUTPUT);                 // Status LED
+	pinMode(greenLED, OUTPUT);               // Status LED
 	pinMode(startSelect, INPUT);                // Start input pin setup
 	pinMode(sdSelect, OUTPUT);                  // Sets sdSelect pin as an output (SD Card)
 	pinMode(vcSelect, OUTPUT);                  // sets vcSelect pin as an output (Volume Controller)
@@ -156,7 +155,7 @@ void loop(void)
 		// delay for the amount of time we want between readings
 		delay((aquirePeriod -1) - (millis() % aquirePeriod));
 
-		digitalWrite(greenLEDpin, HIGH);
+		digitalWrite(greenLED, HIGH);
 
 		// log milliseconds since starting
 		uint32_t m = millis();
@@ -219,32 +218,32 @@ void loop(void)
 		Serial.println();
 #endif // SERIAL_PRINT
 
-		digitalWrite(greenLEDpin, LOW);
+		digitalWrite(greenLED, LOW);
 
     // If determines if enough time has passed to change the attenuation level of the LM1971m.
 		if ((millis() - volUpdated_time) > volumePeriod)
 		{
 			volUpdated_time = millis(); 
 			SPI.beginTransaction(VCSettings);                           // Loads SPI settings for the LM1971
-			digitalWrite(vcSelect, LOW);                               // LM1971 chip select
+			digitalWrite(vcSelect, LOW);                                // LM1971 chip select
 			SPI.transfer(LM1971_Byte_0);                                // Sends the all 0 first byte
 			SPI.transfer(LM1971_Byte_1[volume]);                        // Sents the second byte that dictates the attenuation level, simply uses incremental counter to change values.
 			delay(10);                                                  // just make sure everything is sent fine.
-			digitalWrite(vcSelect, HIGH);                              // Deselect the LM1971
+			digitalWrite(vcSelect, HIGH);                               // Deselect the LM1971
 			SPI.endTransaction();                                       // finish the SPI session
 			if(volume++ > 45)                                           // resets volume if greater than 45 otherwise just increments it                
 			  volume = 0;
 		}
 
 		// Now we write data to disk! Don't sync too often - requires 2048 bytes of I/O to SD card
-		// which uses a bunch of power and takes time
+		// which uses a bunch of power and takes time.
 		if ((millis() - saveSync_time) > savePeriod)
 		{
 			saveSync_time = millis();
 			// blink LED to show we are syncing data to the card & updating FAT!
-			digitalWrite(redLEDpin, HIGH);
+			digitalWrite(redLED, HIGH);
 			TempLogFile.flush();
-			digitalWrite(redLEDpin, LOW);
+			digitalWrite(redLED, LOW);
 		}
 
 	}
